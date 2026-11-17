@@ -1,14 +1,14 @@
 
 import os
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, filters
 )
 
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL = "@zokirovyt"
 CHANNEL_LINK = "https://t.me/zokirovyt"
 
@@ -34,154 +34,166 @@ PRODUCTS = [
     ("Level Up 30", 10000),
 ]
 
-async def subscribed(user_id, context):
+async def is_subscribed(user_id, context):
     try:
-        member = await context.bot.get_chat_member(
-            CHANNEL, user_id
-        )
-        return member.status in [
-            "member", "administrator", "creator"
-        ]
+        member = await context.bot.get_chat_member(CHANNEL, user_id)
+        return member.status in ("member", "administrator", "creator")
     except Exception:
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-
-    if not await subscribed(user.id, context):
-        keyboard = [
-            [InlineKeyboardButton(
-                "📢 Kanalga obuna bo‘lish",
-                url=CHANNEL_LINK
-            )],
-            [InlineKeyboardButton(
-                "✅ Tekshirish", callback_data="check"
-            )]
+    if not await is_subscribed(update.effective_user.id, context):
+        keys = [
+            [InlineKeyboardButton("📢 Kanalga obuna", url=CHANNEL_LINK)],
+            [InlineKeyboardButton("✅ Tekshirish", callback_data="check")]
         ]
         await update.message.reply_text(
-            "ZOKIROV SHOP ga xush kelibsiz!\n\n"
-            "Davom etish uchun kanalimizga obuna bo‘ling.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            "ZOKIROV SHOP ga xush kelibsiz!\nAvval kanalga obuna bo‘ling.",
+            reply_markup=InlineKeyboardMarkup(keys)
         )
         return
+    await menu(update.message)
 
-    await show_menu(update.message, context)
-
-async def show_menu(message, context):
-    keyboard = [
-        [InlineKeyboardButton(
-            "💎 Almaz narxlari", callback_data="prices"
-        )],
-        [InlineKeyboardButton(
-            "🎮 PUBG Mobile", callback_data="pubg"
-        )],
-        [InlineKeyboardButton(
-            "ℹ️ Yordam", callback_data="help"
-        )]
+async def menu(message):
+    keys = [
+        [InlineKeyboardButton("💎 Almaz narxlari", callback_data="prices")],
+        [InlineKeyboardButton("ℹ️ Yordam", callback_data="help")]
     ]
     await message.reply_text(
-        "🏪 ZOKIROV SHOP\n\nKerakli bo‘limni tanlang:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "🏪 ZOKIROV SHOP\nBo‘limni tanlang:",
+        reply_markup=InlineKeyboardMarkup(keys)
     )
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
+    q = update.callback_query
+    await q.answer()
 
-    if query.data == "check":
-        if await subscribed(user_id, context):
-            await query.message.reply_text(
-                "✅ Obuna tasdiqlandi!"
-            )
-            await show_menu(query.message, context)
+    if q.data == "check":
+        if await is_subscribed(q.from_user.id, context):
+            await q.message.reply_text("✅ Obuna tasdiqlandi!")
+            await menu(q.message)
         else:
-            await query.message.reply_text(
-                "❌ Avval kanalga obuna bo‘ling."
-            )
+            await q.message.reply_text("Avval kanalga obuna bo‘ling.")
         return
 
-    if not await subscribed(user_id, context):
-        await query.message.reply_text(
-            "Avval @zokirovyt kanaliga obuna bo‘ling. /start"
-        )
-        return
-
-    if query.data == "prices":
-        keyboard = []
-        for i, (name, price) in enumerate(PRODUCTS):
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"{name} — {price:,} so‘m",
-                    callback_data=f"item_{i}"
-                )
-            ])
-
-        await query.message.reply_text(
-            "💎 FREE FIRE NARXLARI\n\nMahsulotni tanlang:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    elif query.data.startswith("item_"):
-        index = int(query.data.split("_")[1])
-        name, price = PRODUCTS[index]
+    if q.data.startswith("item_"):
+        i = int(q.data.split("_")[1])
+        name, price = PRODUCTS[i]
         context.user_data["product"] = name
         context.user_data["price"] = price
-        context.user_data["waiting_id"] = True
-
-        await query.message.reply_text(
-            f"Tanlangan mahsulot: {name}\n"
-            f"Narxi: {price:,} so‘m\n\n"
-            "Endi Free Fire ID raqamingizni yuboring."
+        context.user_data["step"] = "player_id"
+        await q.message.reply_text(
+            f"{name}\nNarxi: {price:,} so‘m\n\nFree Fire ID raqamingizni yuboring."
         )
-
-    elif query.data == "pubg":
-        await query.message.reply_text(
-            "🎮 PUBG Mobile mahsulotlari tez orada qo‘shiladi."
-        )
-
-    elif query.data == "help":
-        await query.message.reply_text(
-            "Yordam: @zokirovyt"
-        )
-
-async def receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("waiting_id"):
         return
 
-    player_id = update.message.text.strip()
+    if q.data == "prices":
+        keys = [
+            [InlineKeyboardButton(
+                f"{name} — {price:,} so‘m",
+                callback_data=f"item_{i}"
+            )]
+            for i, (name, price) in enumerate(PRODUCTS)
+        ]
+        await q.message.reply_text(
+            "💎 ALMAZ NARXLARI:",
+            reply_markup=InlineKeyboardMarkup(keys)
+        )
+    elif q.data == "help":
+        await q.message.reply_text("Yordam: @zokirovyt")
+    elif q.data.startswith("approve_") or q.data.startswith("reject_"):
+        if q.from_user.id != ADMIN_ID:
+            await q.answer("Bu tugma faqat admin uchun.", show_alert=True)
+            return
 
-    if not player_id.isdigit():
+        order_id = q.data.split("_", 1)[1]
+        order = context.application.bot_data.get("orders", {}).get(order_id)
+        if not order or order["status"] != "pending":
+            await q.message.reply_text("Buyurtma topilmadi yoki ko‘rib chiqilgan.")
+            return
+
+        approved = q.data.startswith("approve_")
+        order["status"] = "approved" if approved else "rejected"
+        await context.bot.send_message(
+            chat_id=order["user_id"],
+            text=("✅ Buyurtmangiz admin tomonidan tasdiqlandi."
+                  if approved else "❌ Buyurtmangiz rad etildi.")
+        )
+        await q.message.edit_reply_markup(reply_markup=None)
+        await q.message.reply_text(
+            f"Buyurtma #{order_id}: {'tasdiqlandi' if approved else 'rad etildi'}."
+        )
+
+async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    step = context.user_data.get("step")
+
+    if step == "player_id":
+        player_id = update.message.text.strip()
+        if not player_id.isdigit():
+            await update.message.reply_text("ID faqat raqamlardan iborat bo‘lsin.")
+            return
+
+        context.user_data["player_id"] = player_id
+        context.user_data["step"] = "receipt"
         await update.message.reply_text(
-            "ID faqat raqamlardan iborat bo‘lishi kerak."
+            "Endi to‘lovni otangiz bergan rasmiy ko‘rsatma asosida amalga oshiring.\n"
+            "So‘ng chek rasmini yuboring."
         )
         return
 
-    name = context.user_data.get("product")
-    price = context.user_data.get("price")
+    if step == "receipt" and update.message.photo:
+        if ADMIN_ID == 0:
+            await update.message.reply_text("Admin ID hali sozlanmagan.")
+            return
 
-    context.user_data["waiting_id"] = False
+        name = context.user_data["product"]
+        price = context.user_data["price"]
+        player_id = context.user_data["player_id"]
+        order_id = str(update.effective_user.id) + str(update.message.message_id)
 
-    await update.message.reply_text(
-        "✅ Sinov buyurtmangiz tayyor!\n\n"
-        f"Mahsulot: {name}\n"
-        f"O‘yin ID: {player_id}\n"
-        f"Narxi: {price:,} so‘m\n\n"
-        "Bu sinov rejimi. Hozircha to‘lov va almaz yetkazish ishlamaydi."
-    )
+        orders = context.application.bot_data.setdefault("orders", {})
+        orders[order_id] = {
+            "user_id": update.effective_user.id,
+            "status": "pending"
+        }
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_{order_id}")],
+            [InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_{order_id}")]
+        ])
+
+        await context.bot.send_photo(
+            chat_id=ADMIN_ID,
+            photo=update.message.photo[-1].file_id,
+            caption=(
+                f"Yangi buyurtma #{order_id}\n"
+                f"Mahsulot: {name}\nNarx: {price:,} so‘m\n"
+                f"O‘yin ID: {player_id}\n"
+                f"Mijoz ID: {update.effective_user.id}\n\n"
+                "Pul tushganini bankdan tekshiring."
+            ),
+            reply_markup=keyboard
+        )
+        context.user_data.clear()
+        await update.message.reply_text(
+            "✅ Chek adminga yuborildi. Pul tushishi tekshirilgach javob beriladi."
+        )
+        return
+
+    if step == "receipt":
+        await update.message.reply_text("Iltimos, chek rasmini yuboring.")
 
 async def main():
     if not TOKEN:
         raise RuntimeError("BOT_TOKEN sozlanmagan")
+    if not ADMIN_ID:
+        raise RuntimeError("ADMIN_ID sozlanmagan")
 
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, receive_id)
-    )
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, messages))
 
-    print("ZOKIROV SHOP bot ishga tushdi")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
@@ -189,7 +201,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    import logging
     logging.basicConfig(level=logging.INFO)
-    import asyncio
     asyncio.run(main())
